@@ -1,0 +1,997 @@
+import { useState, useEffect } from 'react'
+import { useParams, useNavigate, Link } from 'react-router-dom'
+import api from '../../utils/api'
+import Button from '../../components/UI/Button'
+import Card from '../../components/UI/Card'
+import HotelCard from '../../components/Shared/HotelCard'
+import MapComponent from '../../components/MapComponent'
+import jsPDF from 'jspdf'
+
+const getWeatherInfo = (code) => {
+  const weatherMap = {
+    0: { label: 'Clear Sky', emoji: '☀️' },
+    1: { label: 'Mostly Clear', emoji: '🌤️' },
+    2: { label: 'Partly Cloudy', emoji: '⛅' },
+    3: { label: 'Overcast', emoji: '☁️' },
+    45: { label: 'Foggy', emoji: '🌫️' },
+    48: { label: 'Icy Fog', emoji: '🌫️' },
+    51: { label: 'Light Drizzle', emoji: '🌦️' },
+    53: { label: 'Drizzle', emoji: '🌦️' },
+    55: { label: 'Heavy Drizzle', emoji: '🌧️' },
+    61: { label: 'Light Rain', emoji: '🌦️' },
+    63: { label: 'Rain', emoji: '🌧️' },
+    65: { label: 'Heavy Rain', emoji: '🌧️' },
+    71: { label: 'Light Snow', emoji: '🌨️' },
+    73: { label: 'Snow', emoji: '❄️' },
+    75: { label: 'Heavy Snow', emoji: '❄️' },
+    80: { label: 'Rain Showers', emoji: '🌦️' },
+    81: { label: 'Moderate Showers', emoji: '🌧️' },
+    82: { label: 'Heavy Showers', emoji: '⛈️' },
+    95: { label: 'Thunderstorm', emoji: '⛈️' },
+    96: { label: 'Hail Storm', emoji: '⛈️' },
+    99: { label: 'Severe Hail', emoji: '⛈️' },
+  }
+  return weatherMap[code] || { label: 'Unknown', emoji: '🌡️' }
+}
+
+const Itinerary = () => {
+  const { id } = useParams()
+  const navigate = useNavigate()
+
+  const [trip, setTrip] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [selectedDay, setSelectedDay] = useState(1)
+  const [showDeleteCard, setShowDeleteCard] = useState(false)
+  const [selectedHotel, setSelectedHotel] = useState('')
+  const [selectedActivities, setSelectedActivities] = useState({})
+  const [localTransport, setLocalTransport] = useState([])
+
+  const getActivityKey = (day, activity) => `${day}::${activity}`
+
+  const toggleHotelBooked = async (hotel) => {
+
+  try {
+
+    setSelectedHotel(hotel.name)
+
+    await api.put(`/trips/${id}`, {
+      selectedHotel: hotel.name
+    })
+
+  } catch (error) {
+
+    console.log(error)
+  }
+}
+
+
+  const toggleActivity = async (activity, day) => {
+    const activityKey = getActivityKey(day, activity)
+
+    const updatedActivities = {
+      ...selectedActivities,
+      [activityKey]: !selectedActivities[activityKey]
+    }
+
+    setSelectedActivities(updatedActivities)
+
+    try {
+
+      await api.put(`/trips/${id}`, {
+        selectedActivities: updatedActivities
+      })
+
+      // SEND MAIL
+      await api.post(`/trips/${id}/send-activity-mail`, {
+        activity,
+        day,
+        hotel: selectedHotel
+      })
+
+    } catch (error) {
+      console.log(error)
+    }
+  }
+  useEffect(() => {
+    fetchTrip()
+  }, [id])
+
+  useEffect(() => {
+
+  if (trip?.destination) {`n    console.log('[Debug] Calling fetchLocalTransport, destination:', trip.destination);
+
+    fetchLocalTransport()
+
+  }
+
+}, [trip])
+
+  const fetchTrip = async () => {
+    try {
+      setLoading(true)
+      const response = await api.get(`/trips/${id}`)
+
+      setTrip(response.data)
+
+      setSelectedHotel(response.data.selectedHotel || '')
+
+      setSelectedActivities(
+        response.data.selectedActivities || {}
+      )
+      setSelectedDay(
+        response.data?.itinerary?.[0]?.day || 1
+      )
+    } catch (err) {
+      console.error('Error fetching trip:', err)
+      setError(err.response?.data?.message || 'Failed to load trip')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchLocalTransport = async () => {
+  try {
+
+    const response = await api.get(
+      `/api/transport/${trip.destination}`
+    )
+
+    setLocalTransport(Array.isArray(response.data) ? response.data : [])
+
+  } catch (error) {
+
+    console.log(error)
+
+  }
+}
+
+  const handleDelete = async () => {
+    try {
+      await api.delete(`/trips/${id}`)
+      navigate('/dashboard')
+    } catch (err) {
+      console.error('Error deleting trip:', err)
+      setError(err.response?.data?.message || 'Failed to delete trip')
+    }
+  }
+
+
+
+  const getTransportBookingUrl = (option) => {
+
+    const from = encodeURIComponent(trip.originCity || '')
+    const to = encodeURIComponent(trip.destination || '')
+
+    // TRAIN
+    if (option?.type === 'train') {
+
+      return `https://www.google.com/search?q=${from}+to+${to}+train`
+
+    }
+
+    // FLIGHT
+    if (option?.type === 'flight') {
+
+      return `https://www.google.com/travel/flights?q=Flights%20from%20${from}%20to%20${to}`
+
+    }
+
+    return option?.bookingUrl
+  }
+
+  const handleDownloadPdf = () => {
+    if (!trip) return
+
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const margin = 40
+    const contentWidth = pageWidth - margin * 2
+    let y = margin
+
+    const addPageIfNeeded = (spaceNeeded = 60) => {
+      if (y + spaceNeeded > pageHeight - margin) {
+        doc.addPage()
+        y = margin
+      }
+    }
+
+    const addSectionHeader = (title) => {
+      doc.setFillColor(245, 245, 245)
+      doc.rect(margin - 8, y - 4, contentWidth + 16, 26, 'F')
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      doc.setTextColor(30)
+      doc.text(title, margin, y + 16)
+      y += 36
+    }
+
+    doc.setProperties({ title: `${trip.destination} Trip Plan` })
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(24)
+    doc.text(`${trip.destination} Trip Plan`, margin, y)
+
+    y += 28
+    doc.setDrawColor(190)
+    doc.setLineWidth(1)
+    doc.line(margin, y, pageWidth - margin, y)
+    y += 20
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(11)
+    doc.setTextColor(55)
+    doc.text(`Route: ${routeLabel}`, margin, y)
+    y += 16
+    doc.text(`Dates: ${formatDate(trip.startDate)} — ${formatDate(trip.endDate)}`, margin, y)
+    y += 16
+    doc.text(`Travelers: ${trip.travelers}`, margin, y)
+    y += 16
+    doc.text(`Budget: ${currencyFormatter.format(trip.budget)} · Estimated Cost: ${currencyFormatter.format(trip.totalCost || 0)}`, margin, y)
+    y += 16
+    doc.text(`Trip Duration: ${duration} days`, margin, y)
+    y += 26
+
+    addSectionHeader('Transport Summary')
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(11)
+
+    if (!trip.transportOptions?.length) {
+      doc.text('No transport options available.', margin, y)
+      y += 20
+    } else {
+      trip.transportOptions.forEach((option, index) => {
+        addPageIfNeeded(70)
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(12)
+        doc.text(`${index + 1}. ${option.type.toUpperCase()} • ${option.provider}`, margin, y)
+        y += 16
+        doc.setFont('helvetica', 'normal')
+        doc.text(`Route: ${option.route}`, margin + 12, y)
+        y += 14
+        doc.text(`Estimated price per traveler: ${currencyFormatter.format(option.estimatedPrice)}`, margin + 12, y)
+        y += 14
+        doc.text(`Notes: ${option.note || 'N/A'}`, margin + 12, y)
+        y += 18
+      })
+    }
+
+    addSectionHeader('Hotels In Budget')
+
+    if (!trip.hotelOptions?.length) {
+      doc.text('No hotel options are available for this trip.', margin, y)
+      y += 20
+    } else {
+      trip.hotelOptions.forEach((hotel, index) => {
+        addPageIfNeeded(80)
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(12)
+        doc.text(`${index + 1}. ${hotel.name}`, margin, y)
+        y += 16
+        doc.setFont('helvetica', 'normal')
+        doc.text(`Address: ${hotel.address}`, margin + 12, y)
+        y += 14
+        doc.text(`Rating: ${hotel.rating} · Price: ${currencyFormatter.format(hotel.price)}/night`, margin + 12, y)
+        y += 14
+        if (hotel.bookingUrl) {
+          const urlText = `Booking link: ${hotel.bookingUrl}`
+          const splitUrl = doc.splitTextToSize(urlText, contentWidth - 50)
+          doc.text(splitUrl, margin + 12, y)
+          y += splitUrl.length * 14
+        } else {
+          y += 10
+        }
+        y += 8
+      })
+    }
+
+    addSectionHeader('Itinerary Overview')
+
+    trip.itinerary?.forEach((day) => {
+      addPageIfNeeded(90)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(13)
+      doc.text(`Day ${day.day} — ${formatDate(day.date)}`, margin, y)
+      y += 18
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(11)
+
+      if (day.activities?.length) {
+        day.activities.forEach((activity, index) => {
+          addPageIfNeeded(30)
+          const activityText = `${index + 1}. ${activity}`
+          const splitText = doc.splitTextToSize(activityText, contentWidth - 30)
+          doc.text(splitText, margin + 12, y)
+          y += splitText.length * 14
+        })
+      } else {
+        doc.text('No activities planned for this day.', margin + 12, y)
+        y += 16
+      }
+
+      if (day.hotel) {
+        addPageIfNeeded(48)
+        doc.setFillColor(245, 245, 245)
+        doc.roundedRect(margin + 6, y, contentWidth - 12, 34, 6, 6, 'F')
+        doc.setFont('helvetica', 'bold')
+        doc.text(`Recommended hotel: ${day.hotel.name}`, margin + 12, y + 20)
+        doc.setFont('helvetica', 'normal')
+        doc.text(`Price: ${currencyFormatter.format(day.hotel.price)}/night`, margin + 12, y + 34)
+        y += 44
+      } else {
+        y += 14
+      }
+    })
+
+    doc.save(`${trip.destination}-trip-plan.pdf`)
+  }
+
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    })
+  }
+
+  const formatShortDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric'
+    })
+  }
+
+  const getDuration = () => {
+    if (!trip?.startDate || !trip?.endDate) return 0
+    const start = new Date(trip.startDate)
+    const end = new Date(trip.endDate)
+    return Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1
+  }
+
+  const getActivityCount = () => {
+    return trip?.itinerary?.reduce((acc, day) => acc + (day.activities?.length || 0), 0) || 0
+  }
+
+  const getBudgetUsed = () => {
+    if (!trip?.budget) return 0
+    return Math.round(((trip.totalCost || 0) / trip.budget) * 100)
+  }
+
+  if (loading) {
+    return (
+      <div className="itinerary-page">
+        <div className="container">
+          <div className="loading-container">
+            <div className="itinerary-loader">
+              <div className="loader-icon">
+                <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                  <path d="M2 17l10 5 10-5" />
+                  <path d="M2 12l10 5 10-5" />
+                </svg>
+              </div>
+              <h3>Creating Your Itinerary</h3>
+              <p>Generating personalized day-by-day plan...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error && !trip) {
+    return (
+      <div className="itinerary-page">
+        <div className="container">
+          <Card className="error-card">
+            <div className="error-content">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <h3>Oops! Something went wrong</h3>
+              <p>{error}</p>
+              <div className="error-actions">
+                <Button onClick={fetchTrip} variant="primary">Try Again</Button>
+                <Link to="/dashboard">
+                  <Button variant="ghost">Back to Dashboard</Button>
+                </Link>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  if (!trip) return null
+
+  const currentDay = trip.itinerary?.find(day => day.day === selectedDay) || trip.itinerary?.[0]
+  const duration = getDuration()
+  const activityCount = getActivityCount()
+  const budgetUsed = getBudgetUsed()
+  const heroImage = currentDay?.hotel?.image || trip.itinerary?.[0]?.hotel?.image || 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1400'
+  const routeLabel = trip.originCity ? `${trip.originCity} to ${trip.destination}` : trip.destination
+
+  const isIndianUser = trip.originCountry?.trim().toLowerCase() === 'india'
+  const currencyFormatter = new Intl.NumberFormat(isIndianUser ? 'en-IN' : 'en-US', {
+    style: 'currency',
+    currency: isIndianUser ? 'INR' : 'USD',
+    maximumFractionDigits: 0,
+  })
+  const formatMoney = (amount) => currencyFormatter.format(amount || 0)
+
+  return (
+    <div className="itinerary-page">
+      <div className="container itinerary-shell">
+        <div className="itinerary-header">
+          <Link to="/dashboard" className="back-link">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Back to Dashboard
+          </Link>
+        </div>
+
+        <div className="itinerary-grid">
+          <div className="itinerary-main">
+            <section className="trip-overview-card">
+              <div className="trip-hero-media">
+                <img src={heroImage} alt={trip.destination} />
+                <div className="trip-hero-shade"></div>
+                <div className="trip-status-badge" data-status={trip.status}>
+                  {trip.status}
+                </div>
+              </div>
+
+              <div className="trip-overview-content">
+                <span className="trip-kicker">Curated Travel Plan</span>
+                <div className="trip-header">
+                  <div className="trip-location">
+                    <h1>{trip.destination}</h1>
+                    <span className="trip-country">{routeLabel}</span>
+                  </div>
+                  <div className="trip-cost-pill">
+                    <span>Estimated</span>
+                    <strong>{formatMoney(trip.totalCost)}</strong>
+                  </div>
+                </div>
+
+                <div className="trip-meta">
+                  <div className="trip-meta-item">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                      <line x1="16" y1="2" x2="16" y2="6" />
+                      <line x1="8" y1="2" x2="8" y2="6" />
+                      <line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                    <div>
+                      <span className="meta-label">Dates</span>
+                      <span className="meta-value">{formatShortDate(trip.startDate)} - {formatShortDate(trip.endDate)}, {new Date(trip.endDate).getFullYear()}</span>
+                    </div>
+                  </div>
+
+                  <div className="trip-meta-item">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                      <circle cx="9" cy="7" r="4" />
+                    </svg>
+                    <div>
+                      <span className="meta-label">Travelers</span>
+                      <span className="meta-value">{trip.travelers}</span>
+                    </div>
+                  </div>
+
+                  <div className="trip-meta-item">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                    <div>
+                      <span className="meta-label">Duration</span>
+                      <span className="meta-value">{duration} days</span>
+                    </div>
+                  </div>
+
+                  <div className="trip-meta-item">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="12" y1="1" x2="12" y2="23" />
+                      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                    </svg>
+                    <div>
+                      <span className="meta-label">Budget</span>
+                      <span className="meta-value">{formatMoney(trip.budget)}</span>
+                    </div>
+                  </div>
+
+                  {trip.weather && trip.weather.temperature != null && (
+                    <div className="trip-meta-item">
+                      <span style={{ fontSize: '22px' }}>{getWeatherInfo(trip.weather.weatherCode).emoji}</span>
+                      <div>
+                        <span className="meta-label">Weather</span>
+                        <span className="meta-value">{trip.weather.temperature}°C · {getWeatherInfo(trip.weather.weatherCode).label}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {showDeleteCard && (
+                <div className="delete-overlay">
+                  <div className="delete-card">
+                    <div className="delete-icon">
+                      🗑️
+                    </div>
+
+                    <h2>Delete Trip?</h2>
+
+                    <p>
+                      Are you sure you want to delete your trip to
+                      <span> {trip.destination}</span>?
+                    </p>
+
+                    <div className="delete-actions">
+                      <button
+                        className="cancel-btn"
+                        onClick={() => setShowDeleteCard(false)}
+                      >
+                        Cancel
+                      </button>
+
+
+                      <button
+                        className="delete-btn"
+                        onClick={handleDelete}
+                      >
+                        Delete Trip
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </section>
+
+            {trip.weather?.length > 0 && (
+              <section className="travel-options-card">
+                <div className="section-heading-row">
+                  <div>
+                    <span className="section-eyebrow">Forecast</span>
+                    <h2 className="day-selector-title">Weather at {trip.destination}</h2>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px' }}>
+                  {trip.weather.map((w, i) => (
+                    <div key={i} style={{ minWidth: '120px', background: '#f8f9ff', borderRadius: '12px', padding: '14px 12px', textAlign: 'center', flexShrink: 0 }}>
+                      <img src={w.icon} alt={w.description} style={{ width: '48px', height: '48px' }} />
+                      <div style={{ fontWeight: 700, fontSize: '20px' }}>{w.temp}°C</div>
+                      <div style={{ fontSize: '11px', color: '#666', textTransform: 'capitalize', marginBottom: '4px' }}>{w.description}</div>
+                      <div style={{ fontSize: '11px', color: '#888' }}>💧 {w.humidity}%</div>
+                      <div style={{ fontSize: '11px', color: '#888' }}>💨 {w.wind} m/s</div>
+                      <div style={{ fontSize: '10px', color: '#aaa', marginTop: '4px' }}>{new Date(w.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {trip.transportOptions?.length > 0 && (
+              <section className="travel-options-card">
+                <div className="section-heading-row">
+                  <div>
+                    <span className="section-eyebrow">Tickets</span>
+                    <h2 className="day-selector-title">Transport Options</h2>
+                  </div>
+                  <span className="activity-count-pill">
+                    {trip.originCountry?.toLowerCase() === trip.country?.toLowerCase() ? 'Domestic' : 'International'}
+                  </span>
+                </div>
+
+                <div className="travel-options-grid">
+
+                  {trip.transportOptions.map((option, index) => (
+
+                    <article
+                      key={index}
+                      className="travel-option-card"
+                    >
+
+                      <div className="travel-option-top">
+
+                        <div className="travel-icon">
+                          {option.type === 'train' ? '🚆' : '✈️'}
+                        </div>
+
+                        <div>
+                          <div className="travel-type-pill">
+                            {option.type === 'train' ? 'Train' : 'Flight'}
+                          </div>
+                          <h3>{option.provider}</h3>
+                          <p>{option.type === 'train' ? 'Rail service' : 'Airline service'}</p>
+                        </div>
+                      </div>
+
+                      <div className="travel-route">
+                        {option.route}
+                      </div>
+
+                      <div className="travel-info">
+
+                        <span>
+                          💰 {formatMoney(option.estimatedPrice)}
+                        </span>
+
+                        <span>
+                          ⏱ {option.duration}
+                        </span>
+
+                      </div>
+
+                      <p className="travel-note">
+                        {option.note}
+                      </p>
+
+                      <a
+                        href={getTransportBookingUrl(option)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="external-booking-link"
+                      >
+                        Book {option.type}
+                      </a>
+
+                    </article>
+
+                  ))}
+
+                </div>
+              </section>
+            )}
+
+            {localTransport.length > 0 && (
+
+<section className="travel-options-card">
+
+  <div className="section-heading-row">
+    <div>
+      <span className="section-eyebrow">
+        Local Travel
+      </span>
+
+      <h2 className="day-selector-title">
+        Cab & Vehicle Rentals
+      </h2>
+    </div>
+  </div>
+
+  <div className="travel-options-grid">
+
+    {localTransport.map((item,index)=>(
+
+      <article
+        key={index}
+        className="travel-option-card"
+      >
+
+        <div className="travel-option-top">
+
+          <div className="travel-icon">
+            🚕
+          </div>
+
+          <div>
+            <h3>{item.name}</h3>
+            <p>{item.formatted_address}</p>
+          </div>
+
+        </div>
+
+        <div className="travel-info">
+
+          <span>
+            ⭐ {item.rating || "N/A"}
+          </span>
+
+        </div>
+        
+
+      </article>
+
+    ))}
+
+  </div>
+
+</section>
+
+)}
+
+            {trip.hotelOptions?.length > 0 && (
+              <section className="travel-options-card">
+
+                <div className="section-heading-row">
+                  <div>
+                    <span className="section-eyebrow">
+                      Stay Options
+                    </span>
+
+                    <h2 className="day-selector-title">
+                      Hotels In Budget
+                    </h2>
+                  </div>
+
+                  <span className="activity-count-pill">
+                    With prices
+                  </span>
+                </div>
+
+                <div className="hotel-options-grid">
+
+                  {trip.hotelOptions.map((hotel) => (
+
+                    <article
+                      key={hotel.name}
+                      className={`hotel-option-card ${selectedHotel === hotel.name ? 'selected-hotel' : ''}`}
+                      onClick={() => toggleHotelBooked(hotel)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          toggleHotelBooked(hotel)
+                        }
+                      }}
+                    >
+                      <img
+                        src={hotel.image}
+                        alt={hotel.name}
+                      />
+
+                      <div>
+
+                        <h3>
+                          {hotel.name}
+
+                          {selectedHotel === hotel.name && (<span
+                            style={{
+                              color: 'green',
+                              marginLeft: '10px',
+                              fontSize: '14px'
+                            }}
+                          >
+                            ✔ Selected
+                          </span>
+                          )}
+
+                        </h3>
+
+                        <p>{hotel.address}</p>
+
+                        <span>
+                          {hotel.rating} rating
+                        </span>
+
+                        <strong>
+                          {formatMoney(hotel.price)}/night
+                        </strong>
+
+                        <a
+                          href={hotel.bookingUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="external-booking-link"
+                        >
+                          View On Booking
+                        </a>
+
+                      </div>
+
+                    </article>
+
+                  ))}
+
+                </div>
+
+              </section>
+            )}
+
+            {trip.coordinates?.lat && trip.coordinates?.lon && (
+              <section className="travel-options-card">
+                <div className="section-heading-row">
+                  <div>
+                    <span className="section-eyebrow">Location</span>
+                    <h2 className="day-selector-title">Map of {trip.destination}</h2>
+                  </div>
+                </div>
+                <MapComponent
+                  lat={trip.coordinates.lat}
+                  lon={trip.coordinates.lon}
+                  originLat={trip.originCoordinates?.lat}
+                  originLon={trip.originCoordinates?.lon}
+                  destination={trip.destination}
+                  originCity={trip.originCity}
+                />
+              </section>
+            )}
+
+            <section className="day-selector">
+              <div className="section-heading-row">
+                <div>
+                  <span className="section-eyebrow">Daily Flow</span>
+                  <h2 className="day-selector-title">Your Itinerary</h2>
+                </div>
+                <span className="activity-count-pill">
+                  {selectedHotel ? `${activityCount} activities` : 'Book a hotel to unlock activities'}
+                </span>
+              </div>
+
+              <div className="day-tabs">
+                {trip.itinerary?.map(day => (
+                  <button
+                    key={day.day}
+                    className={`day-tab ${selectedDay === day.day ? 'day-tab-active' : ''}`}
+                    onClick={() => setSelectedDay(day.day)}
+                  >
+                    <span className="day-tab-number">Day {day.day}</span>
+                    <span className="day-tab-date">{formatShortDate(day.date)}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {!selectedHotel ? (
+              <section className="day-detail-card no-hotel-selected">
+                <div className="day-header">
+                  <div>
+                    <span className="section-eyebrow">Hotel Required</span>
+                    <h2>Book a Hotel to Unlock Activities</h2>
+                    <span className="day-full-date">Select a hotel from above to view your day-by-day activities.</span>
+                  </div>
+                </div>
+                <div className="activities">
+                  <p style={{ margin: 0, color: '#555' }}>
+                    Activities are hidden until a hotel is selected. Choose a hotel to continue planning your trip.
+                  </p>
+                </div>
+              </section>
+            ) : currentDay && (
+              <section className="day-detail-card">
+                <div className="day-header">
+                  <div>
+                    <span className="section-eyebrow">Selected Day</span>
+                    <h2>Day {currentDay.day}</h2>
+                    <span className="day-full-date">{formatDate(currentDay.date)}</span>
+                  </div>
+                  <div className="day-weather-chip">
+                    {trip.weather && trip.weather.temperature != null
+                      ? `${getWeatherInfo(trip.weather.weatherCode).emoji} ${trip.weather.temperature}°C · ${getWeatherInfo(trip.weather.weatherCode).label}`
+                      : 'Balanced Pace'
+                    }
+                  </div>
+                </div>
+
+                <div className="activities">
+                  <h3 className="activities-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                      <polyline points="22 4 12 14.01 9 11.01" />
+                    </svg>
+                    Planned Activities
+                  </h3>
+                  <ul className="activities-list">
+                    {currentDay.activities?.map((activity, index) => (
+                      <li
+                        key={getActivityKey(currentDay.day, activity)}
+                        className={`activity-item ${selectedActivities[getActivityKey(currentDay.day, activity)]
+                          ? 'selected-activity'
+                          : ''
+                          }`}
+                        onClick={() =>
+                          toggleActivity(
+                            activity,
+                            currentDay.day
+                          )
+                        }
+                      >
+                        <div className="activity-number">{String(index + 1).padStart(2, '0')}</div>
+                        <div className="activity-copy">
+                          <strong>{activity}</strong>
+                          {selectedActivities[getActivityKey(currentDay.day, activity)] && (
+                            <span style={{ color: 'green' }}>
+                              ✔ Selected
+                            </span>
+                          )}
+                          <span>{index === 0 ? 'Morning highlight' : index === 1 ? 'Afternoon plan' : 'Evening wind-down'}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {currentDay.hotel && (
+                  <div className="recommended-hotel">
+                    <h3 className="hotel-title">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 21h18" />
+                        <path d="M5 21V7l8-4 8 4v14" />
+                        <path d="M9 21v-6h6v6" />
+                      </svg>
+                      Recommended Hotel
+                    </h3>
+                    <HotelCard hotel={currentDay.hotel} />
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+
+          <div className="itinerary-sidebar">
+            <aside className="sidebar-card trip-actions-card">
+              <h3>Trip Actions</h3>
+              <div className="sidebar-actions">
+                <Button variant="outline" fullWidth onClick={handleDownloadPdf}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download PDF
+                </Button>
+                <Button
+                  variant="primary"
+                  fullWidth
+                  onClick={() => navigate(`/planner/${trip._id}`)}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                  </svg>
+                  Edit Trip
+                </Button>
+
+                <Button
+                  variant="outline"
+                  fullWidth
+                  onClick={() => setShowDeleteCard(true)}
+                >                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                  Delete Trip
+                </Button>
+              </div>
+            </aside>
+
+            <aside className="sidebar-card">
+              <h3>Quick Stats</h3>
+              <div className="stats-list">
+                <div className="stat-row">
+                  <span>Duration</span>
+                  <strong>{duration} days</strong>
+                </div>
+                <div className="stat-row">
+                  <span>Activities</span>
+                  <strong>{activityCount}</strong>
+                </div>
+                <div className="stat-row">
+                  <span>Budget Used</span>
+                  <strong>{budgetUsed}%</strong>
+                </div>
+              </div>
+              <div className="budget-meter">
+                <span style={{ width: `${Math.min(budgetUsed, 100)}%` }}></span>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default Itinerary
+
+
+
+
+

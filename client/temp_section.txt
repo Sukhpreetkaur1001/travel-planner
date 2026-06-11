@@ -1,0 +1,64 @@
+﻿            {localTransport.length > 0 && (
+
+<section className="travel-options-card">
+
+  <div className="section-heading-row">
+    <div>
+      <span className="section-eyebrow">
+        Local Travel
+      </span>
+
+      <h2 className="day-selector-title">
+        Cab & Vehicle Rentals
+      </h2>
+    </div>
+  </div>
+
+  <div className="travel-options-grid">
+
+    {localTransport.map((item,index)=>(
+
+      <article
+        key={index}
+        className="travel-option-card"
+      >
+
+        <div className="travel-option-top">
+
+          <div className="travel-icon">
+            ðŸš•
+          </div>
+
+          <div>
+            <h3>{item.name}</h3>
+            <p>{item.formatted_address}</p>
+          </div>
+
+        </div>
+
+      <div className="travel-info">
+  <span>⭐ {item.rating}</span>
+  <span>{item.price}</span>
+</div>
+
+<p>{item.description}</p>
+
+<a
+  href={item.bookingUrl}
+  target="_blank"
+  rel="noreferrer"
+  className="external-booking-link"
+>
+  Book Now
+</a>
+
+      </article>
+
+    ))}
+
+  </div>
+
+</section>
+
+)}
+
