@@ -29,14 +29,19 @@ app.get('/api/weather/:destination', protect, async (req, res) => {
   res.json(data);
 });
 
-const clientDistPath = path.join(__dirname, '../client/dist');
-if (fs.existsSync(clientDistPath)) {
-  app.use(express.static(clientDistPath));
+// const clientDistPath = path.join(__dirname, '../client/dist');
+// if (fs.existsSync(clientDistPath)) {
+//   app.use(express.static(clientDistPath));
 
-  app.get(/.*/, (req, res) => {
-    res.sendFile(path.join(clientDistPath, 'index.html'));
+//   app.get(/.*/, (req, res) => {
+//     res.sendFile(path.join(clientDistPath, 'index.html'));
+//   });
+// }
+
+app.get("/", (req, res) => {
+  res.json({
+    message: "Travel Planner Backend is Live 🚀"
   });
-}
-
+});
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
