@@ -574,8 +574,10 @@ const createTrip = async (req, res) => {
     console.log('[Weather] fetched:', weather ? weather.length + ' entries' : 'null');
 
 
-    require('fs').appendFileSync('d:/Project/server/api_debug.log', `[DEBUG] ${new Date().toISOString()} - destination=${destination}, lat=${lat}, lon=${lon}, apiKey=${process.env.GEOAPIFY_API_KEY ? 'Loaded' : 'Missing'}\n`);
-
+    // require('fs').appendFileSync('d:/Project/server/api_debug.log', `[DEBUG] ${new Date().toISOString()} - destination=${destination}, lat=${lat}, lon=${lon}, apiKey=${process.env.GEOAPIFY_API_KEY ? 'Loaded' : 'Missing'}\n`);
+console.log(
+  `[DEBUG] destination=${destination}, lat=${lat}, lon=${lon}`
+);
     const hotelOptions = await generateHotelOptions({
       destination,
       startDate,
