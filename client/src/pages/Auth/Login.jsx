@@ -122,9 +122,7 @@ const Login = () => {
                     className="form-input"
                   />
 
-                  <span className="input-icon">
-                    ✉️
-                  </span>
+
 
                 </div>
 
@@ -148,9 +146,7 @@ const Login = () => {
                     className="form-input"
                   />
 
-                  <div className="input-icon">
-                    🔒
-                  </div>
+
 
                   <button
                     type="button"
